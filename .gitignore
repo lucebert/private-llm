@@ -1,0 +1,7 @@
+.venv
+
+models/7B/*
+
+.DS_Store
+
+__pycache__
