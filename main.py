@@ -12,8 +12,7 @@ llm = Llama(
         # chat_format="llama-2"  # String specifying the chat format to use
     )
 
-async def create_chat_completion(message: str):
-    memory = update_memory("user", message)
+async def create_chat_completion(memory: List[str]):
     return llm.create_chat_completion(
         stream=True,
         messages=[
@@ -37,7 +36,8 @@ async def on_chat_start():
 @cl.on_message
 async def main(message: cl.Message):
     msg = cl.Message(content="", author="Assistant")
-    output = await create_chat_completion(message.content)
+    memory = update_memory("user", message.content)
+    output = await create_chat_completion(memory)
     response = ""
     for chunk in output:
         delta = chunk['choices'][0]['delta']
