@@ -12,6 +12,7 @@ pipenv install
 ## Download the model
 
 ```bash
+mkdir -p models/7B
 curl -L -o models/7B/llama-2-7b-chat.Q2_K.gguf https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.Q2_K.gguf?download=true
 ```
 
