@@ -12,9 +12,27 @@ description = "Private LLM implementation"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "click>=8.1.0",
-    "pydantic>=2.0.0",
-    "loguru>=0.7.0",
+    "click==8.1.7",
+    "pydantic==2.5.3",
+    "loguru==0.7.2",
+    "langchain==0.1.1",
+    "langgraph==0.0.19",
+    "chainlit==1.0.0",
+    "llama-cpp-python==0.2.39",
+    "sqlalchemy==2.0.25",
+    "psycopg2-binary==2.9.9",
+    "redis==5.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.4",
+    "pytest-cov==4.1.0",
+    "pytest-asyncio==0.23.3",
+    "black==23.12.1",
+    "isort==5.13.2",
+    "mypy==1.8.0",
+    "ruff==0.1.9",
 ]
 
 [tool.ruff]

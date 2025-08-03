@@ -6,9 +6,16 @@ from pathlib import Path
 import chainlit as cl
 from llama_cpp import Llama
 from sqlalchemy.orm import Session
+from loguru import logger
 
+from config import Config
 from database import get_db, ChatMessage, cache_query
 from cache import get_cache, set_cache
+from logger import setup_logging
+
+# Load configuration based on environment
+config = Config.load()
+setup_logging(config.dict())
 
 class ModelConfigurationError(Exception):
     """Raised when model configuration is invalid"""
@@ -25,26 +32,24 @@ def validate_model_path(model_path: str) -> str:
         raise ModelConfigurationError(f"Model file {model_path} is not readable")
     return str(path)
 
-def initialize_llm(model_path: str = "./models/7B/llama-2-7b-chat.Q2_K.gguf", 
-                n_ctx: int = 2048,
-                n_gpu_layers: int = 0) -> Llama:
+def initialize_llm() -> Llama:
     """Initialize LLM with validated configuration"""
-    validated_path = validate_model_path(model_path)
+    model_config = config.model
+    validated_path = validate_model_path(model_config.model_path)
     
-    if n_ctx < 512 or n_ctx > 8192:
-        raise ModelConfigurationError(f"Context window {n_ctx} must be between 512 and 8192")
-        
     try:
         return Llama(
             model_path=validated_path,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            use_mlock=True,
-            chat_format="llama-2"
+            n_ctx=model_config.n_ctx,
+            n_gpu_layers=model_config.n_gpu_layers,
+            use_mlock=model_config.use_mlock,
+            chat_format=model_config.chat_format
         )
     except Exception as e:
+        logger.error(f"Failed to initialize LLM: {str(e)}")
         raise ModelConfigurationError(f"Failed to initialize LLM: {str(e)}")
 
+logger.info("Initializing LLM with configuration: {}", config.model)
 llm = initialize_llm()
 
 async def create_chat_completion(memory: List[str]):
@@ -134,9 +139,9 @@ def update_memory(role: str, content: str) -> List[Dict[str, str]]:
             logger.error(f"Failed to persist messages: {e}")
             raise
 
-    # Update cache and session memory
+    # Update cache and session memory based on config
     memory = memory[-2:]  # Keep only last 2 messages
-    if not set_cache(cache_key, memory, 3600):  # Cache for 1 hour
+    if not set_cache(cache_key, memory, config.cache.ttl):
         cl.user_session.set("memory", memory)  # Fallback to session if cache fails
     else:
         cl.user_session.set("memory", memory)
