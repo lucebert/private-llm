@@ -1,7 +1,12 @@
 from typing import Dict, List
+from contextlib import contextmanager
 
 import chainlit as cl
 from llama_cpp import Llama
+from sqlalchemy.orm import Session
+
+from database import get_db, ChatMessage
+from cache import get_cache, set_cache
 
 llm = Llama(
         model_path="./models/7B/llama-2-7b-chat.Q2_K.gguf",  # Path to the model.
@@ -50,12 +55,30 @@ async def main(message: cl.Message):
 
 
 def update_memory(role: str, content: str) -> List[Dict[str, str]]:
-    """ Handle small memory by keeping only the last 2 messages and truncating assistant's response"""
-    memory = cl.user_session.get("memory")
+    """ Handle conversation memory with database persistence, pooling and caching """
+    session_id = cl.user_session.get("session_id", "default")
+    cache_key = f"memory:{session_id}"
+    
+    # Try to get memory from cache first
+    memory = get_cache(cache_key) or cl.user_session.get("memory")
     memory.append({"role": role, "content": content})
-    if role == "assistant":
-        content = content[:150]  # Truncate assistant's response to 150 characters
-    cl.user_session.set("memory", memory[-2:])  # Keep only the last 2 messages
+    
+    # Persist message to database using connection pool
+    db = next(get_db())
+    try:
+        db_message = ChatMessage(role=role, content=content[:150] if role == "assistant" else content)
+        db.add(db_message)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+    # Update cache and session memory
+    memory = memory[-2:]  # Keep only last 2 messages
+    set_cache(cache_key, memory, 3600)  # Cache for 1 hour
+    cl.user_session.set("memory", memory)
     return memory
 
 if __name__ == "__main__":
