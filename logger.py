@@ -1,7 +1,23 @@
 import sys
 from pathlib import Path
 from loguru import logger
-from typing import Dict, Union
+from typing import Dict, Union, Optional
+import json
+from datetime import datetime
+
+class LogSetupError(Exception):
+    """Raised when log setup fails"""
+    pass
+
+def format_error_context(error: Exception, **kwargs) -> str:
+    """Format error context as JSON for structured logging"""
+    context = {
+        'error_type': error.__class__.__name__,
+        'error_message': str(error),
+        'timestamp': datetime.utcnow().isoformat(),
+        **kwargs
+    }
+    return json.dumps(context)
 
 def setup_logging(config: Dict[str, Union[str, bool]]) -> None:
     """Configure logging based on environment settings"""
@@ -32,8 +48,11 @@ def setup_logging(config: Dict[str, Union[str, bool]]) -> None:
         
     else:
         # Production: Log to file with rotation
-        log_path = Path("logs")
-        log_path.mkdir(exist_ok=True)
+        try:
+            log_path = Path("logs")
+            log_path.mkdir(exist_ok=True)
+        except Exception as e:
+            raise LogSetupError(f"Failed to create log directory: {e}")
         
         logger.add(
             log_path / "app.log",
@@ -47,16 +66,29 @@ def setup_logging(config: Dict[str, Union[str, bool]]) -> None:
         )
         
         # Add separate error log file
-        logger.add(
-            log_path / "error.log",
-            format=log_format,
-            level="ERROR",
-            rotation="100 MB",
-            retention="30 days",
-            compression="zip",
-            backtrace=True,
-            diagnose=True,
-        )
+        try:
+            # Add enhanced error logging with structured format
+            error_format = (
+                "<red>{time:YYYY-MM-DD HH:mm:ss}</red> | "
+                "<level>{level: <8}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
+                "<level>{message}</level> | "
+                "Context: {extra}"
+            )
+            
+            logger.add(
+                log_path / "error.log",
+                format=error_format,
+                level="ERROR",
+                rotation="100 MB",
+                retention="30 days",
+                compression="zip",
+                backtrace=True,
+                diagnose=True,
+                catch=True,  # Catch any exceptions during logging
+            )
+        except Exception as e:
+            raise LogSetupError(f"Failed to setup error logging: {e}")
         
         if debug:
             # Add debug log file if debug is enabled in production

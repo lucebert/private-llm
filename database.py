@@ -2,7 +2,8 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, e
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.exc import SQLAlchemyError, OperationalError, DisconnectionError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError, DisconnectionError, IntegrityError
+from tenacity import retry, stop_after_attempt, wait_exponential
 import datetime
 import logging
 from typing import Generator
@@ -141,19 +142,40 @@ def cache_query(ttl: int = 300) -> Callable:
         return wrapper
     return decorator
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+def get_session_with_retry() -> scoped_session:
+    """Get database session with retry logic"""
+    try:
+        session = SessionLocal()
+        # Test the connection
+        session.execute('SELECT 1')
+        return session
+    except Exception as e:
+        logger.error(f"Failed to get database session: {e}")
+        raise DatabaseConnectionError(f"Could not establish database session: {e}")
+
 @contextmanager
 def get_db() -> Generator[scoped_session, None, None]:
     """Get database session with improved error handling, automatic rollback, and query caching"""
-    session = SessionLocal()
+    session = None
     try:
+        session = get_session_with_retry()
         yield session
     except OperationalError as e:
-        session.rollback()
+        if session:
+            session.rollback()
         logger.error(f"Database operational error: {e}")
         raise DatabaseConnectionError(f"Database connection failed: {e}")
+    except IntegrityError as e:
+        if session:
+            session.rollback()
+        logger.error(f"Database integrity error: {e}")
+        raise DatabaseError(f"Data integrity violation: {e}")
     except SQLAlchemyError as e:
-        session.rollback()
+        if session:
+            session.rollback()
         logger.error(f"Database error: {e}")
         raise DatabaseSessionError(f"Database operation failed: {e}")
     finally:
-        session.close()
+        if session:
+            session.close()

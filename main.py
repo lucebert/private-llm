@@ -52,41 +52,73 @@ def initialize_llm() -> Llama:
 logger.info("Initializing LLM with configuration: {}", config.model)
 llm = initialize_llm()
 
+class ChatCompletionError(Exception):
+    """Raised when chat completion fails"""
+    pass
+
 async def create_chat_completion(memory: List[str]):
-    return llm.create_chat_completion(
-        stream=True,
-        messages=[
-        {
-            "role": "system",
-            "content": "You are a helpful assistant",
+    try:
+        return llm.create_chat_completion(
+            stream=True,
+            messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant",
+            },
+            *memory
+        ],
+        response_format={
+            "type": "text"
         },
-        *memory
-    ],
-    response_format={
-        "type": "text"
-    },
-    temperature=0,
-)
+        temperature=0,
+    )
+    except Exception as e:
+        logger.error(f"Chat completion failed: {str(e)}")
+        raise ChatCompletionError(f"Failed to generate response: {str(e)}")
 
 @cl.on_chat_start
 async def on_chat_start():
-    memory = []
-    cl.user_session.set("memory", memory)
+    try:
+        memory = []
+        cl.user_session.set("memory", memory)
+        logger.info("New chat session started")
+    except Exception as e:
+        logger.error(f"Failed to initialize chat session: {str(e)}")
+        raise
 
 @cl.on_message
 async def main(message: cl.Message):
-    msg = cl.Message(content="", author="Assistant")
-    memory = update_memory("user", message.content)
-    output = await create_chat_completion(memory)
-    response = ""
-    for chunk in output:
-        delta = chunk['choices'][0]['delta']
-        if 'content' in delta:
-            response += delta['content']
-            await msg.stream_token(delta['content'])
-
-    update_memory("assistant", response)
-    await msg.send()
+    try:
+        msg = cl.Message(content="", author="Assistant")
+        memory = update_memory("user", message.content)
+        
+        try:
+            output = await create_chat_completion(memory)
+            response = ""
+            for chunk in output:
+                try:
+                    delta = chunk['choices'][0]['delta']
+                    if 'content' in delta:
+                        response += delta['content']
+                        await msg.stream_token(delta['content'])
+                except (KeyError, IndexError) as e:
+                    logger.error(f"Invalid response chunk format: {str(e)}")
+                    raise ChatCompletionError(f"Invalid response format: {str(e)}")
+                
+            update_memory("assistant", response)
+            await msg.send()
+            
+        except ChatCompletionError as e:
+            error_msg = f"I apologize, but I encountered an error: {str(e)}"
+            await cl.Message(content=error_msg, author="Assistant").send()
+            logger.error(f"Chat completion error: {str(e)}")
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in message handler: {str(e)}")
+        await cl.Message(
+            content="I apologize, but something went wrong. Please try again later.",
+            author="Assistant"
+        ).send()
 
 
 def validate_message(role: str, content: str) -> None:
