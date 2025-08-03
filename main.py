@@ -1,5 +1,7 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from contextlib import contextmanager
+import os
+from pathlib import Path
 
 import chainlit as cl
 from llama_cpp import Llama
@@ -8,14 +10,42 @@ from sqlalchemy.orm import Session
 from database import get_db, ChatMessage
 from cache import get_cache, set_cache
 
-llm = Llama(
-        model_path="./models/7B/llama-2-7b-chat.Q2_K.gguf",  # Path to the model.
-        # n_gpu_layers=-1,  # Default is 0 means use CPU
-        # use_mlock=True,  # Force the system to keep the model in RAM.
-        # seed=1337,  # Uncomment to set a specific seed
-        # n_ctx=2048,  # Uncomment to increase the context window
-        # chat_format="llama-2"  # String specifying the chat format to use
-    )
+class ModelConfigurationError(Exception):
+    """Raised when model configuration is invalid"""
+    pass
+
+def validate_model_path(model_path: str) -> str:
+    """Validate that model path exists and is accessible"""
+    path = Path(model_path)
+    if not path.exists():
+        raise ModelConfigurationError(f"Model file not found at {model_path}")
+    if not path.is_file():
+        raise ModelConfigurationError(f"Model path {model_path} is not a file")
+    if not os.access(path, os.R_OK):
+        raise ModelConfigurationError(f"Model file {model_path} is not readable")
+    return str(path)
+
+def initialize_llm(model_path: str = "./models/7B/llama-2-7b-chat.Q2_K.gguf", 
+                n_ctx: int = 2048,
+                n_gpu_layers: int = 0) -> Llama:
+    """Initialize LLM with validated configuration"""
+    validated_path = validate_model_path(model_path)
+    
+    if n_ctx < 512 or n_ctx > 8192:
+        raise ModelConfigurationError(f"Context window {n_ctx} must be between 512 and 8192")
+        
+    try:
+        return Llama(
+            model_path=validated_path,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+            use_mlock=True,
+            chat_format="llama-2"
+        )
+    except Exception as e:
+        raise ModelConfigurationError(f"Failed to initialize LLM: {str(e)}")
+
+llm = initialize_llm()
 
 async def create_chat_completion(memory: List[str]):
     return llm.create_chat_completion(
@@ -54,31 +84,48 @@ async def main(message: cl.Message):
     await msg.send()
 
 
+def validate_message(role: str, content: str) -> None:
+    """Validate chat message parameters"""
+    valid_roles = {"user", "assistant", "system"}
+    if role not in valid_roles:
+        raise ValueError(f"Invalid role: {role}. Must be one of {valid_roles}")
+    if not content or not isinstance(content, str):
+        raise ValueError("Message content must be a non-empty string")
+    if len(content) > 4096:  # Reasonable max length
+        raise ValueError("Message content exceeds maximum length of 4096 characters")
+
 def update_memory(role: str, content: str) -> List[Dict[str, str]]:
     """ Handle conversation memory with database persistence, pooling and caching """
+    validate_message(role, content)
+    
     session_id = cl.user_session.get("session_id", "default")
+    if not session_id:
+        raise ValueError("Invalid session ID")
+        
     cache_key = f"memory:{session_id}"
     
     # Try to get memory from cache first
-    memory = get_cache(cache_key) or cl.user_session.get("memory")
+    memory = get_cache(cache_key)
+    if memory is None:
+        memory = cl.user_session.get("memory")
+        if not isinstance(memory, list):
+            memory = []  # Reset if invalid
+            
     memory.append({"role": role, "content": content})
     
-    # Persist message to database using connection pool
-    db = next(get_db())
-    try:
-        db_message = ChatMessage(role=role, content=content[:150] if role == "assistant" else content)
+    # Persist message to database using connection pool with improved error handling
+    with get_db() as db:
+        truncated_content = content[:150] if role == "assistant" else content
+        db_message = ChatMessage(role=role, content=truncated_content)
         db.add(db_message)
         db.commit()
-    except Exception as e:
-        db.rollback()
-        raise e
-    finally:
-        db.close()
 
     # Update cache and session memory
     memory = memory[-2:]  # Keep only last 2 messages
-    set_cache(cache_key, memory, 3600)  # Cache for 1 hour
-    cl.user_session.set("memory", memory)
+    if not set_cache(cache_key, memory, 3600):  # Cache for 1 hour
+        cl.user_session.set("memory", memory)  # Fallback to session if cache fails
+    else:
+        cl.user_session.set("memory", memory)
     return memory
 
 if __name__ == "__main__":
