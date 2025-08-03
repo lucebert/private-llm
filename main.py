@@ -7,7 +7,7 @@ import chainlit as cl
 from llama_cpp import Llama
 from sqlalchemy.orm import Session
 
-from database import get_db, ChatMessage
+from database import get_db, ChatMessage, cache_query
 from cache import get_cache, set_cache
 
 class ModelConfigurationError(Exception):
@@ -94,6 +94,11 @@ def validate_message(role: str, content: str) -> None:
     if len(content) > 4096:  # Reasonable max length
         raise ValueError("Message content exceeds maximum length of 4096 characters")
 
+@cache_query(ttl=60)
+def get_recent_messages(db: Session, limit: int = 10) -> List[ChatMessage]:
+    """Get recent messages with caching"""
+    return db.query(ChatMessage).order_by(ChatMessage.timestamp.desc()).limit(limit).all()
+
 def update_memory(role: str, content: str) -> List[Dict[str, str]]:
     """ Handle conversation memory with database persistence, pooling and caching """
     validate_message(role, content)
@@ -113,12 +118,21 @@ def update_memory(role: str, content: str) -> List[Dict[str, str]]:
             
     memory.append({"role": role, "content": content})
     
-    # Persist message to database using connection pool with improved error handling
+    # Persist message to database using connection pool with improved error handling and batch operations
     with get_db() as db:
-        truncated_content = content[:150] if role == "assistant" else content
-        db_message = ChatMessage(role=role, content=truncated_content)
-        db.add(db_message)
-        db.commit()
+        try:
+            # Use bulk insert for better performance
+            truncated_content = content[:150] if role == "assistant" else content
+            db_message = ChatMessage(role=role, content=truncated_content)
+            db.bulk_save_objects([db_message])
+            db.commit()
+            
+            # Update cached recent messages
+            get_recent_messages.cache_clear() if hasattr(get_recent_messages, 'cache_clear') else None
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Failed to persist messages: {e}")
+            raise
 
     # Update cache and session memory
     memory = memory[-2:]  # Keep only last 2 messages
