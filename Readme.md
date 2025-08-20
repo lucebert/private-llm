@@ -23,3 +23,5 @@ you can find other models on [HuggingFace](https://huggingface.co/TheBloke/)
 ```bash
 pipenv run python -m main
 ```
+
+> Chore: minor documentation touch (2025-08-20T23:27:58.330Z)
