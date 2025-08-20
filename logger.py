@@ -20,7 +20,17 @@ def format_error_context(error: Exception, **kwargs) -> str:
     return json.dumps(context)
 
 def setup_logging(config: Dict[str, Union[str, bool]]) -> None:
-    """Configure logging based on environment settings"""
+    """Configure logging based on environment settings.
+    
+    Args:
+        config: Dictionary containing logging configuration with keys:
+            - log_level: Logging level (default: "INFO")
+            - debug: Enable debug mode (default: False)
+            - env: Environment name (default: "development")
+    
+    Raises:
+        LogSetupError: If log directory creation or setup fails
+    """
     log_level = config.get("log_level", "INFO")
     debug = config.get("debug", False)
     env = config.get("env", "development")
