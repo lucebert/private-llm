@@ -42,5 +42,28 @@ class Config(BaseModel):
             raise ValueError(f"Config file for environment {env} not found")
             
         config_dict = {}
-        exec(config_file.read_text(), {}, config_dict)
-        return cls(**config_dict.get("config", {}))
+        try:
+            with open(config_file) as f:
+                exec(compile(f.read(), config_file, 'exec'), {}, config_dict)
+        except Exception as e:
+            raise ValueError(f"Failed to load config from {config_file}: {e}")
+            
+        config_data = config_dict.get("config", {})
+        
+        # Validate sensitive fields
+        cls._validate_paths(config_data)
+        cls._validate_urls(config_data)
+        
+        return cls(**config_data)
+        
+    @staticmethod
+    def _validate_paths(config: dict) -> None:
+        model_path = config.get("model", {}).get("model_path")
+        if model_path and not model_path.startswith(("./", "/")):
+            raise ValueError("model_path must be an absolute path or start with ./")
+            
+    @staticmethod
+    def _validate_urls(config: dict) -> None:
+        db_url = config.get("database", {}).get("url")
+        if db_url and not db_url.startswith(("sqlite://", "postgresql://")):
+            raise ValueError("database url must start with sqlite:// or postgresql://")

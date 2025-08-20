@@ -4,20 +4,32 @@ from loguru import logger
 from typing import Dict, Union, Optional
 import json
 from datetime import datetime
+import traceback
 
 class LogSetupError(Exception):
     """Raised when log setup fails"""
     pass
 
-def format_error_context(error: Exception, **kwargs) -> str:
-    """Format error context as JSON for structured logging"""
+def format_error_context(error: Exception, request_id: Optional[str] = None, **kwargs) -> str:
+    """Format error context as JSON for structured logging.
+    
+    Args:
+        error: The exception to format
+        request_id: Optional request identifier for tracing
+        **kwargs: Additional context to include in the output
+    
+    Returns:
+        JSON string containing error details and context
+    """
     context = {
         'error_type': error.__class__.__name__,
         'error_message': str(error),
         'timestamp': datetime.utcnow().isoformat(),
+        'request_id': request_id,
+        'traceback': getattr(error, '__traceback__', None) and ''.join(traceback.format_tb(error.__traceback__)),
         **kwargs
     }
-    return json.dumps(context)
+    return json.dumps({k: v for k, v in context.items() if v is not None})
 
 def setup_logging(config: Dict[str, Union[str, bool, "development" | "production"]]) -> None:
     """Configure logging based on environment settings.
@@ -83,7 +95,7 @@ def setup_logging(config: Dict[str, Union[str, bool, "development" | "production
                 "<level>{level: <8}</level> | "
                 "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
                 "<level>{message}</level> | "
-                "Context: {extra}"
+                "Context: {extra}" | 
             )
             
             logger.add(

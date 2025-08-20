@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, event
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, event, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import QueuePool
@@ -84,6 +84,19 @@ SessionLocal = scoped_session(
 Base = declarative_base()
 
 class ChatMessage(Base):
+    """Database model for storing chat messages.
+    
+    Attributes:
+        id: Unique identifier for the message
+        role: The role of the message sender (user, assistant, or system)
+        content: The actual message content
+        timestamp: When the message was created (UTC)
+    
+    Indexes:
+        - role: For filtering by message role
+        - timestamp: For time-based queries
+        - idx_role_timestamp: Composite index for role+time filtering
+    """
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True)
