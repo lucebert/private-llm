@@ -6,8 +6,10 @@ from sqlalchemy.exc import SQLAlchemyError, OperationalError, DisconnectionError
 from tenacity import retry, stop_after_attempt, wait_exponential
 import datetime
 import logging
-from typing import Generator
+from typing import Generator, Optional, TypeVar, Callable, Any
 from contextlib import contextmanager
+from functools import wraps
+from cache import get_cache, set_cache, CacheError
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -141,16 +143,28 @@ from sqlalchemy.orm import Query
 T = TypeVar('T')
 
 def cache_query(ttl: int = 300) -> Callable:
-    """Decorator to cache query results"""
+    """Decorator to cache query results with fallback on cache errors"""
     def decorator(f: Callable[..., T]) -> Callable[..., T]:
         @wraps(f)
         def wrapper(*args, **kwargs) -> T:
             cache_key = f"query:{f.__name__}:{str(args)}:{str(kwargs)}"
-            result = get_cache(cache_key)
-            if result is not None:
-                return result
+            try:
+                result = get_cache(cache_key)
+                if result is not None:
+                    logger.debug(f"Cache hit for key: {cache_key}")
+                    return result
+            except CacheError as e:
+                logger.warning(f"Cache read failed, falling back to database: {e}")
+                result = None
+
             result = f(*args, **kwargs)
-            set_cache(cache_key, result, ttl)
+            
+            try:
+                set_cache(cache_key, result, ttl)
+                logger.debug(f"Cached result for key: {cache_key}")
+            except CacheError as e:
+                logger.warning(f"Cache write failed: {e}")
+            
             return result
         return wrapper
     return decorator

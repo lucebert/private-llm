@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Dict, Optional
 import os
+import yaml
 from pydantic import BaseModel, Field
 
 class ModelConfig(BaseModel):
@@ -36,19 +37,16 @@ class Config(BaseModel):
             env = os.getenv("APP_ENV", "development")
             
         config_dir = Path(__file__).parent
-        config_file = config_dir / f"{env}.py"
+        config_file = config_dir / f"{env}.yaml"
         
         if not config_file.exists():
             raise ValueError(f"Config file for environment {env} not found")
             
-        config_dict = {}
         try:
             with open(config_file) as f:
-                exec(compile(f.read(), config_file, 'exec'), {}, config_dict)
+                config_data = yaml.safe_load(f)
         except Exception as e:
             raise ValueError(f"Failed to load config from {config_file}: {e}")
-            
-        config_data = config_dict.get("config", {})
         
         # Validate sensitive fields
         cls._validate_paths(config_data)
