@@ -19,7 +19,7 @@ def format_error_context(error: Exception, **kwargs) -> str:
     }
     return json.dumps(context)
 
-def setup_logging(config: Dict[str, Union[str, bool]]) -> None:
+def setup_logging(config: Dict[str, Union[str, bool, "development" | "production"]]) -> None:
     """Configure logging based on environment settings.
     
     Args:
