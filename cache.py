@@ -42,20 +42,24 @@ def create_redis_client() -> redis.Redis:
 redis_client = create_redis_client()
 
 def validate_cache_key(key: str) -> None:
-    """Validate cache key"""
+    """Validate cache key for length and safe characters"""
     if not isinstance(key, str):
         raise ValueError("Cache key must be a string")
     if not key:
         raise ValueError("Cache key cannot be empty")
     if len(key) > 512:  # Redis default max key length
         raise ValueError("Cache key exceeds maximum length")
+    
+    safe_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:')
+    if not all(c in safe_chars for c in key):
+        raise ValueError("Cache key contains invalid characters")
 
-def get_cache(key: str) -> Optional[Any]:
-    """Get value from Redis cache with improved error handling"""
+def get_cache(key: str, timeout: int = 2) -> Optional[Any]:
+    """Get value from Redis cache with improved error handling and timeout"""
     validate_cache_key(key)
     
     try:
-        value = redis_client.get(key)
+        value = redis_client.get(key, timeout=timeout)
         if value is None:
             return None
             
@@ -72,8 +76,8 @@ def get_cache(key: str) -> Optional[Any]:
         logger.error(f"Redis error when getting key {key}: {e}")
         raise CacheError(f"Cache operation failed: {e}")
 
-def set_cache(key: str, value: Any, expire: int = 3600) -> bool:
-    """Set value in Redis cache with expiration and validation"""
+def set_cache(key: str, value: Any, expire: int = 3600, timeout: int = 2) -> bool:
+    """Set value in Redis cache with expiration, validation and timeout"""
     validate_cache_key(key)
     
     if expire <= 0:
@@ -88,7 +92,7 @@ def set_cache(key: str, value: Any, expire: int = 3600) -> bool:
         raise CacheSerializationError(f"Failed to serialize value: {e}")
         
     try:
-        return bool(redis_client.setex(key, expire, serialized))
+        return bool(redis_client.setex(key, expire, serialized, timeout=timeout))
     except redis.ConnectionError as e:
         logger.error(f"Redis connection error: {e}")
         raise CacheConnectionError(f"Failed to connect to Redis: {e}")

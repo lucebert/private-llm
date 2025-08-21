@@ -178,7 +178,16 @@ def get_session_with_retry() -> scoped_session:
         session.execute('SELECT 1')
         return session
     except Exception as e:
-        logger.error(f"Failed to get database session: {e}")
+        error_context = {
+            'error_type': e.__class__.__name__,
+            'timestamp': datetime.datetime.utcnow().isoformat(),
+            'pool_info': {
+                'size': engine.pool.size(),
+                'overflow': engine.pool.overflow(),
+                'timeout': engine.pool.timeout()
+            }
+        }
+        logger.error(f"Failed to get database session: {e}", extra=error_context)
         raise DatabaseConnectionError(f"Could not establish database session: {e}")
 
 @contextmanager
